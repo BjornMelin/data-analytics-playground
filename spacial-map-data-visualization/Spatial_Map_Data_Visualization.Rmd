@@ -1,0 +1,285 @@
+---
+title: "Spatial Map Data Visualization for Nice Ride Bicycles"
+author: "Bjorn Melin"
+date: "4/9/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(ggmap)
+library(leaflet)
+library(rgdal)
+library(maps)
+library(mapdata)
+library(broom)
+library(maptools)
+library(leaflet.extras)
+library(scales)
+#library(plyr)
+# When you use google to get place information, register your key.  
+# (You need to be connected to the web.)
+ggmap::register_google(key = "AIzaSyDwEoO3zb84PWYxp8_uK3z163Gkc4wLLKg")
+```
+
+## **Initial Glimpse Of Data Tables**  
+**Table 1: Nice Ride Trip History 2017**  
+Source: Nice_ride_data_2017_season/Nice_ride_trip_history_2017_season.csv   
+```{r, echo=FALSE}
+# Reads in the trip history data from the 2017 season dataset
+trip_hist_2017 <- read.csv(file = "Nice_ride_data_2017_season/Nice_ride_trip_history_2017_season.csv")
+glimpse(trip_hist_2017)
+```
+
+**Table 2: Nice Ride Station Locations 2017**  
+Source: Nice_ride_data_2017_season/Nice_Ride_2017_Station_Locations.csv    
+```{r, echo=FALSE}
+# Reads in the station data from the 2017 season dataset
+station_locations_2017 <- read.csv(file = "Nice_ride_data_2017_season/Nice_Ride_2017_Station_Locations.csv")
+glimpse(station_locations_2017, title = "Nice Ride Station Locations 2017")
+```
+\
+
+## 1.  
+### **Question:**  
+Develop a data graphic that illustrates a trend or pattern over time - either across the length of the available data, or over the course of a day or season.
+
+### **Answer:**  
+
+#### **A & B. Question To Be Answered:**  Around what time of year do people use Nice Ride bikes the most?  How do times of year affect how much people use Nice Ride bikes?
+
+#### Plot A & B: Changes In The Number Of Trips Taken Each Week Over The Year.
++ Plot A shows a line connecting points between each week.
++ Plot B shows a smooth line of best fit denoting the changes in bike rides taken per week.  It also includes a standard error for the fitted curve.  
+
+```{r, echo=FALSE, message=FALSE}
+# NOTE: Uncomment all glimpses or print outs of tables to view what they contain.
+#       The tables I constructed when data wrangling were not included in output.
+
+# Uses lubridate package to tidy the datasets.  I added columns for the dates 
+# in the trip history dataset so that they were formatted in an easier to work 
+# with fashion for when data wrangling to create my graphics.  
+# Then selected all variables excluding the old dates.
+trip_hist_2017_tidy <- trip_hist_2017 %>% mutate(start = mdy_hm(Start.date),
+                                                 end=mdy_hm(End.date)) %>% 
+  select(start, end, Start.station.number, Start.station, End.station, End.station.number,
+         Account.type, Total.duration..Seconds.)
+#glimpse(trip_hist_2017_tidy)
+
+#### Want to find a way to plot a line showing the amount of rides per 
+#### week over the course of the season
+# Modifies the tidied trip history data table so that it counts the number of times
+# a rider started at a specific time, then arranges by increasing start time.
+riders_per_week <- trip_hist_2017_tidy %>% 
+  group_by(start) %>% 
+  summarize(N = n()) %>% 
+  arrange(start) 
+#riders_per_week
+
+# Modifies the riders_per_week table created above so that it sums up all rides
+# started at a specific time within each week of the season.  The output is a 
+# table in which the total number of rides taken each week is shown.
+riders_per_week1 <- riders_per_week %>% group_by(week = floor_date(start, "week")) %>% 
+  select(week, N) %>% 
+  group_by(week) %>% 
+  summarize(N = n())
+#riders_per_week1
+
+# Converts the week column in riders_per_week1 to be formatted as dates in R
+week <- as.Date(riders_per_week1$week)
+# Puts the new "week" as date data into its own data frame
+dates <- as.data.frame(week)
+#dates
+
+# modifies riders_per_week1 by selecting on the N column, then column binding
+# it with the newly created dates table.  Since both dates and count were 
+# sorted to match up in the previous tables, the counts and weeks will still
+# match up correctly.
+riders_per_week2 <- riders_per_week1 %>% select(N) %>% 
+  cbind(dates) %>% 
+  select(week, N)
+#riders_per_week2
+
+#### Plot A ####
+# Creates a ggplot using riders_per_week2 data where x is the week of the 2017 
+# Nice Ride bike year and y is the number of rides (using start data) taken 
+# during each week.  Points are added to denote the Count per week and a 
+# connecting line is added in to connect all points, showing clearly the changes
+# by week.
+riders_per_week1_plot <- ggplot(data = riders_per_week2, aes(x = week, y = N)) +
+  geom_point() +
+  geom_line(color = "blue") +
+  scale_x_date(date_breaks = "1 week", date_labels =  "%b-%Y-%d") +
+  scale_y_continuous(breaks = c(0, 1000, 2000, 3000, 4000, 5000, 6000, 7000)) +
+  theme(axis.text.x=element_text(angle=60, hjust=1)) +
+  xlab(label = "Week") +
+  ylab(label = "Number of Rides Each Week") +
+  ggtitle(label = "Bike Rides Taken Each Week Throughout the Season (2017)") +
+  theme(plot.title = element_text(size = rel(1.2), face = "bold", hjust = 0.5),
+        axis.text.x = element_text(face = "bold", size = rel(0.8)),
+        axis.title = element_text(face = "bold", size = rel(0.9))) 
+riders_per_week1_plot
+
+cat("\n\n")  # Adds some space between the two plots for easier viewing
+
+#### Plot B ####
+# Creates a ggplot that is the same as Plot A but instead of using geom_line()
+# to connect each Count point, it uses geom_smooth() to shows a smooth line 
+# of best fit denoting the changes in bike rides taken per week.  
+# It also includes a standard error for the fitted curve.  
+riders_per_week1_plot2 <- ggplot(data = riders_per_week2, aes(x = week, y = N)) +
+  geom_point() +
+  geom_smooth() +
+  scale_x_date(date_breaks = "1 week", date_labels =  "%b-%Y-%d") +
+  theme(axis.text.x=element_text(angle=60, hjust=1)) +
+  xlab(label = "Week") +
+  ylab(label = "Number of Rides Each Week") +
+  ggtitle(label = "Bike Rides Taken Each Week Throughout the Season (2017)",
+          subtitle = "(Line of Best Fit & Standard Error)") +
+  theme(plot.title = element_text(size = rel(1.2), face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(size = rel(1), face = "italic", hjust = 0.5),
+        axis.text.x = element_text(face = "bold", size = rel(0.8)),
+        axis.title = element_text(face = "bold", size = rel(0.9))) 
+riders_per_week1_plot2
+```
+
+##### Plot A Description:  
+Plot A shows the variation in number of Nice Ride bike trips taken each week throughout the year 2017.  The first step in creating Plot A was tidying the trip history data table by adding in new columns/variables for `start` and `end` dates which contained the same data as in `Start.date` and `End.date` in the original data table except reformatted for the purpose of making the data table easier to work with when data wrangling to create my graphics.  Next, I modified the tidied trip history data table so that it would count the number of bike rides taken from a Nice Ride bike station at each specific time in the table, then arranging the new tidied trip history table by increasing starting date.  Then, I modified the newly created trip history table so that it would sum up all rides started at a specific time within each week of the season.  The output of this step is a table in which the total number of rides taken each week is shown.  After that I converted the week column in the most recent table to be formatted as a date in R so that it would function properly when creating a graphic.  The next step was selecting only the column containing the total number of riders in a given week from the last trip history table created and then column binding it with the table I created containing the matching dates in R format.  Since both dates and count were arranged to match up in the previous tables, the counts and weeks still matched up correctly.  Finally, after all of this wrangling I was able to create my two plots.  For Plot A I created a plot using `ggplot()` which used data from the final table I formed in which the x-axis was set to the variable `week` and the y-axis was set to the variable `N`, which denotes the number of rides taken in each week.  Through the use of the command `geom_point()` I was able to add in all points that matched up with the count for each week.  Then, by adding the command `geom_line()` I connected each point with a straight line.  If a more in depth explanation is required, refer to source code comments.  
+
+\  
+
+This graphic makes it easy to answer the question of what time of year do people use Nice Ride bikes the most and also how the time of year affects how much people use Nice Ride bikes very clearly.  You can see immediately that the time of year in which people most use Nice Ride bikes is in June and July, which would be expected as that is the nicest time of the year in Minnesota.  We also see that Nice Ride bike usage grows in a relatively linear fashion throughout the spring, peaking and holding pretty steady in the summer, and then dropping off sharply over the course of the fall as it gets colder.  Another interesting thing about this graphic is that you can interpret the peaks and troughs in the points in terms of looking to see what happened during that week to cause the peak or trough.  My main thought is that it is almost entirely dependent on the weather.  As you can see, there is a sharp dip in usage during one week in May which I believe to be caused by either a very rainy week or one of our classic Minnesota April/May snow storms.  There is also another dip down in August which I believe is due to a very rainy week.  This graphic could be useful in helping Nice Ride plan for the following years in terms of expected revenue, stock of bikes, and when to start offering bikes in the year. 
+
+\  
+
+##### Plot B Description:  
+Similar to Plot A, Plot B also shows the variation in number of Nice Ride bike trips taken each week throughout the year 2017 except it uses line of best fit instead of connecting each point via a straight line.  Plot B uses the same data as does Plot A, with all aspects of the `ggplot()` exactly the same except instead of using the command `geom_line()` I used the command `geom_smooth()`.  By using `geom_smooth()`, A line of best fit for the number of rides taken throughout the course of 2017 was added to the plot, corresponding to each point on the plot.  Plot B also includes gray regions which represent the standard error of the line.  
+
+\
+
+This graphic answers the questions on hand in the exact same way as did Plot A.  The only difference in Plot B is that I think the line of best fit is easier to interpret and would be a better model for Nice Ride when trying to make use of the plot and data for future planning.  One downside of this plot is that you cannot see the peaks and troughs as well but I think when looking at a graphic which shows change over a long period of time, a non-linear model is best for extracting meaning.  
+
+\
+\  
+
+## 2.  
+### **Question:**  
+Develop a spatial data graphic (it can be static or dynamic), using only one year’s worth of data.  
+
+### **Answer:**  
+#### **A. Question To Be Answered:**  Where are all Nice Ride stations locations in the Minneapolis/St. Paul area?  
+
+##### Plot A: All Nice Ride Bike Locations in Minneapolis/St. Paul (2017)  
+
+```{r, echo=FALSE, message=FALSE}
+# NOTE: Uncomment all glimpses or print outs of tables to view what they contain.
+#       The tables I constructed when data wrangling were not included in output.
+
+# I need to create the map using the station_locations_2017 data
+#glimpse(station_locations_2017)
+
+# Makes a google map of the Minneapolis/St Paul area
+msp_map <- get_map(location=c("Minneapolis/St Paul, Minnesota"),maptype = "roadmap",zoom=11)
+#ggmap(msp_map)
+
+# Creates a ggplot with points denoting the location of all bike stations
+# in the Minneapolis area
+station_plot <- ggplot() +
+  geom_point(data = station_locations_2017, aes(x= Longitude, y = Latitude)) +
+  coord_fixed(ratio = 1.3)
+#station_plot
+
+#### Plot A ####
+# Combines the map of Minneapolis generated and the plot of the bike stations
+# in the Minneapolis area.  Used xlim and ylim to make the point more easy to
+# differentiate.
+ggmap(msp_map) +
+  geom_point(data = station_locations_2017, aes(x= Longitude, y = Latitude), 
+             size = 1, alpha = 0.75) +
+  coord_fixed(ratio = 1.3, xlim = c(-93.4,-93.05), ylim = c(44.875,45.05)) +
+  xlab(label = "Longitude") + 
+  ylab(label = "Latitude") +
+  ggtitle(label = "Nice Ride Bike Station Locations In MPLS/STP (2017)") +
+  theme(axis.title = element_text(face = "bold", size = rel(1)),
+        plot.title = element_text(size = rel(1.2), face = "bold", hjust = 0.5))
+```
+
+##### Plot A Description:  
+Plot A shows all Nice Ride station locations in the Minneapolis/St. Paul area in 2017.  The first step to making this graphic was creating a map of the Minneapolis/St. Paul area using google maps and the `get_map()` function.  Once I had the map of the Minneapolis/St. Paul area created, I then created a separate `ggplot()` in which the station location data from my source was used to plot points of all station locations with respect to their latitude and longitude variables.  The last step to creating this graphic was combining the map of the Minneapolis/St. Paul area with the plot of all Nice Ride station locations.  To do so, I used the function `ggmap()` to create the Minneapolis/St. Paul map and added in the points of all Nice Ride station locations using the function `geom_point()`.  If a more in depth explanation is required, refer to source code comments.  
+\
+This graphic answers the question of where all Nice Ride station locations in the Minneapolis/St. Paul area are very clearly by displaying all station locations as points on a static map of the area.  This could be useful if you were planning a bike ride, trying to figure out where the closest place to drop a bike off is, where you can pick up a bike, and could aid a customer in making the decision of whether or not to rent a bike at all.
+\
+\
+
+#### **B. Question To Be Answered:** What were the top five most popular starting locations for people riding Nice Ride bikes in 2017?  What was the most popular starting location?  
+
+##### Plot B: The Top 5 Most Popular Nice Ride Starting Locations in Minneapolis/St. Paul 
+
+```{r, echo=FALSE, message=FALSE}
+# NOTE: Uncomment all glimpses or print outs of tables to view what they contain.
+#       The tables I constructed when data wrangling were not included in output.
+
+# Now I want to create a map which show the top 5 most used bike stops
+# Makes a google map of the Minneapolis/St Paul area
+msp_map <- get_map(location=c("Minneapolis/St Paul, Minnesota"), 
+                   maptype = "roadmap", zoom=11)
+#ggmap(msp_map)
+
+# Modifies the station locations plot by joinging it with the trip history
+# plot by the station number, then selecting the table to include only
+# the variables "Number, Name, Latitude, and Longitude"
+merged <- station_locations_2017 %>% 
+  inner_join(trip_hist_2017_tidy, by = c("Number" = "Start.station.number")) %>% 
+  select(Number, Name, Latitude, Longitude)
+#glimpse(merged)
+
+# Modifies the previously created merged table by grouping by the station 
+# number and summarizing the number of times a station number appears in
+# the data table `merged`, then ungrouping for safety and arranging 
+# in descending order by the new `Count` variable.
+merged1 <- merged %>% 
+  group_by(Number) %>% 
+  summarize(Count = n()) %>% 
+  ungroup() %>% 
+  arrange(desc(Count))
+#merged1
+
+# Joins the last table `merged1` with `merged` by the station number 
+# and selects only the variables we will need to create the spatial maps.
+# Again, arranging in descending order by `Count` and then only showing
+# the top 5 stations in terms of their count.
+merged2 <- merged1 %>% inner_join(merged, by = "Number") %>% 
+  select(Number, Count, Latitude, Longitude, Name) %>% 
+  distinct(Number, Count, Latitude, Longitude, Name) %>% 
+  arrange(desc(Count)) %>% 
+  head(5)
+#merged2
+
+#### Plot B ####
+# Combines the map of Minneapolis generated and the plot of the bike stations
+# in the Minneapolis area.  Used xlim and ylim to make the point more easy to
+# differentiate.
+ggmap(msp_map) +
+  geom_point(data = merged2, aes(x= Longitude, y = Latitude, 
+                                    size = Count, color = Name), alpha = 0.85) +
+  coord_fixed(ratio = 1.3, xlim = c(-93.32,-93.22), ylim = c(44.94,44.985)) +
+  xlab(label = "Longitude") + 
+  ylab(label = "Latitude") +
+  ggtitle(label = "Top 5 Nice Ride Starting Stations In MPLS/STP (2017)") +
+  theme(plot.title = element_text(size = rel(1.2), face = "bold", hjust = 0.5), 
+        legend.title = element_text(size = rel(0.8), face = "bold", color = "red"),
+        legend.key.size = unit(0.4, "cm"),
+        legend.position = "bottom",
+        legend.box = "horizontal",
+        legend.direction = "vertical",
+        axis.title = element_text(face = "bold", size = rel(0.8)))
+```
+
+##### Plot B Description:  
+Plot B shows the top five most popular Nice Ride locations which people started their trips from in the Minneapolis/St. Paul area in 2017.  The first step to creating this graphic was the same as in Plot A in which a map of the Minneapolis/St. Paul area was created.  The next step was to merge both of the source data tables using an `inner_join()` where the `Number` variable in the station locations table was joined by the `Start.station.number` variable in the trip history table so that I could have both Nice Ride station location data and trip history data in the same table, with the `Number` variable now holding data for the start station of each trip.  I then selected this table to only include the variables `Number, Name, Latitude, Longitude` to get rid of excess data.  Next, I created another merged data table from the first merged data table except summarized the number of times a station number appeared in the table.  For the final data wrangling step of this graphics creation, I combined both the first and second merged tables using another `inner_join` and used the `distinct()` data verb to only show one row for each station so at this point there would be a column containing the number of times someone started at a certain location.  Then I arranged in descending order by `Count` and used the `head()` command to display only the top five most popular starting locations.  Finally, I created my graphic in the same way which Plot A was created.  Through use of the `ggmap()` command I created my map, then by using `geom_point()` I was able to add in points to the map for the top five most popular Nice Ride starting station locations in 2017.  I also made use of aesthetics by setting the color of the points to vary per location and the size of the points to be representative of the number of rides which started at each location.  If a more in depth explanation is required, refer to source code comments.  
+\
+This graphic does a great job in answering the question of what the top five most popular Nice Ride starting station locations were in the Minneapolis/St. Paul area in 2017.  You can clearly see where the most popular starting station locations are on the map and you can see how popularity among starting locations varies based on their sizes.  A viewer can clearly see from this graphic that the station named "Lake Street & Knox Ave S" was the most popular starting location in 2017, followed closely by "Washington Ave SE & Union Street SE".  Similar to as in question 1, both of these plots could be useful for Nice Ride when trying to decide which specific areas in Minneapolis/St. Paul they should be paying the most attention to or trying to target.  Also, these graphics would be useful for planning where to stock bikes and determining how much revenue to expect from certain locations.
+
+
