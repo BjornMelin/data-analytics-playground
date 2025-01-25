@@ -21,7 +21,7 @@ library(scales)
 #library(plyr)
 # When you use google to get place information, register your key.  
 # (You need to be connected to the web.)
-ggmap::register_google(key = "AIzaSyDwEoO3zb84PWYxp8_uK3z163Gkc4wLLKg")
+ggmap::register_google(key = "YOUR_API_KEY")
 ```
 
 ## **Initial Glimpse Of Data Tables**  
